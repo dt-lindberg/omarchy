@@ -38,6 +38,25 @@ const shellSource = fs.readFileSync(root + '/shell/shell.qml', 'utf8')
 
 assert(/function toggleBarTransparency\(\): string \{[\s\S]*?shell\.bar\.toggleTransparency\(\)/.test(shellSource), 'shell exposes the bar transparency toggle over IPC')
 
+// A theme switch must not sample the transparent text color before its colors
+// and wallpaper reach the shell, and a sample asked for while one runs must not
+// be lost, or the bar keeps the previous theme's text color.
+assert(
+  /onFileChanged: if \(!root\.backgroundTracksApplied\) root\.scheduleTransparentForegroundRefresh\(\)/.test(barSource) &&
+    /backgroundTracksApplied: !!backgroundService && backgroundService\.appliedBackground !== undefined/.test(barSource) &&
+    /onAppliedBackgroundChanged: scheduleTransparentForegroundRefresh\(\)/.test(barSource) &&
+    /firstPartyServiceFor\("omarchy\.background"\)/.test(barSource) &&
+    /command\.push\("--background", root\.appliedBackground\)/.test(barSource),
+  'transparent bar samples the wallpaper the shell applied, and watches the state directory only without one'
+)
+const textColorProc = barSource.slice(barSource.indexOf('id: transparentForegroundProc'))
+assert(
+  /if \(transparentForegroundProc\.running\) \{\s*transparentForegroundRefreshQueued = true\s*return/.test(barSource) &&
+    /if \(root\.transparentForegroundRefreshQueued \|\| /.test(textColorProc) &&
+    /onExited: \{\s*if \(!root\.transparentForegroundRefreshQueued\) return\s*root\.transparentForegroundRefreshQueued = false\s*root\.scheduleTransparentForegroundRefresh\(\)/.test(textColorProc),
+  'transparent bar samples again after a run that started before the latest change'
+)
+
 // put tolerates a placement target the bar does not carry, so the IPC call
 // must reach the registry's put rather than route back through enable.
 assert(
