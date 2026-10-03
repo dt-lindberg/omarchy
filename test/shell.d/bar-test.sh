@@ -50,16 +50,21 @@ assert(
   'transparent bar samples the wallpaper the shell applied, and watches the state directory only without one'
 )
 const textColorProc = barSource.slice(barSource.indexOf('id: transparentForegroundProc'))
+// The whole handler, whether written on one line or as a block: it ends where
+// the Process block closes.
+const exitedStart = textColorProc.indexOf('onExited:')
+const exitedHandler = exitedStart === -1 ? '' : textColorProc.slice(exitedStart, textColorProc.indexOf('\n  }', exitedStart))
 assert(
   /if \(transparentForegroundProc\.running\) \{\s*transparentForegroundRefreshQueued = true\s*return\s*\}[\s\S]*?transparentForegroundRefreshQueued = false\s*var command/.test(barSource) &&
     /if \(root\.transparentForegroundRefreshQueued \|\| /.test(textColorProc) &&
-    /onExited: if \(root\.transparentForegroundRefreshQueued\) root\.scheduleTransparentForegroundRefresh\(\)/.test(textColorProc),
+    exitedHandler.includes('transparentForegroundRefreshQueued') &&
+    exitedHandler.includes('scheduleTransparentForegroundRefresh()'),
   'transparent bar samples again after a run that started before the latest change'
 )
 // Output can arrive after the process exits, so the outdated answer stays
 // blocked until the replacement starts, not just until the old run exits.
 assert(
-  !/onExited:[^\n]*transparentForegroundRefreshQueued = false/.test(textColorProc),
+  exitedHandler !== '' && !/transparentForegroundRefreshQueued\s*=\s*false/.test(exitedHandler),
   'an outdated transparent text color answer stays blocked after its process exits'
 )
 
