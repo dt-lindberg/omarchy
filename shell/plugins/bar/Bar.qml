@@ -1074,6 +1074,9 @@ Item {
       transparentForegroundRefreshQueued = true
       return
     }
+    // The discarded answer can still arrive after its process exits, so it
+    // stays blocked until this replacement sample starts.
+    transparentForegroundRefreshQueued = false
 
     var command = [
       "omarchy-bar-text-color",
@@ -1116,11 +1119,7 @@ Item {
         root.restoreForegroundAnimation()
       }
     }
-    onExited: {
-      if (!root.transparentForegroundRefreshQueued) return
-      root.transparentForegroundRefreshQueued = false
-      root.scheduleTransparentForegroundRefresh()
-    }
+    onExited: if (root.transparentForegroundRefreshQueued) root.scheduleTransparentForegroundRefresh()
   }
 
   FileView {

@@ -51,10 +51,16 @@ assert(
 )
 const textColorProc = barSource.slice(barSource.indexOf('id: transparentForegroundProc'))
 assert(
-  /if \(transparentForegroundProc\.running\) \{\s*transparentForegroundRefreshQueued = true\s*return/.test(barSource) &&
+  /if \(transparentForegroundProc\.running\) \{\s*transparentForegroundRefreshQueued = true\s*return\s*\}[\s\S]*?transparentForegroundRefreshQueued = false\s*var command/.test(barSource) &&
     /if \(root\.transparentForegroundRefreshQueued \|\| /.test(textColorProc) &&
-    /onExited: \{\s*if \(!root\.transparentForegroundRefreshQueued\) return\s*root\.transparentForegroundRefreshQueued = false\s*root\.scheduleTransparentForegroundRefresh\(\)/.test(textColorProc),
+    /onExited: if \(root\.transparentForegroundRefreshQueued\) root\.scheduleTransparentForegroundRefresh\(\)/.test(textColorProc),
   'transparent bar samples again after a run that started before the latest change'
+)
+// Output can arrive after the process exits, so the outdated answer stays
+// blocked until the replacement starts, not just until the old run exits.
+assert(
+  !/onExited:[^\n]*transparentForegroundRefreshQueued = false/.test(textColorProc),
+  'an outdated transparent text color answer stays blocked after its process exits'
 )
 
 // put tolerates a placement target the bar does not carry, so the IPC call
