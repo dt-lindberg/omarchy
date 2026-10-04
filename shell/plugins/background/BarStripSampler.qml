@@ -62,11 +62,15 @@ Item {
     var data = ctx.getImageData(0, 0, w, h).data
     // A still covers the canvas, but a video wallpaper would show it.
     ctx.clearRect(0, 0, w, h)
+    // Transparent pixels count as white, as when omarchy-bar-text-color
+    // flattens the wallpaper in ImageMagick, so both paths choose alike.
     var red = 0, green = 0, blue = 0
     for (var i = 0; i < data.length; i += 4) {
-      red += data[i]
-      green += data[i + 1]
-      blue += data[i + 2]
+      var alpha = data[i + 3] / 255
+      var white = 255 * (1 - alpha)
+      red += data[i] * alpha + white
+      green += data[i + 1] * alpha + white
+      blue += data[i + 2] * alpha + white
     }
     canvas.unloadImage(grabUrl)
     grabUrl = ""
