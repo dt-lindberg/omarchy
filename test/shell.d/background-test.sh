@@ -34,6 +34,13 @@ assert(
   'bar strip sampler reads the canvas only when it paints, then clears it'
 )
 
+// ImageMagick flattens a transparent wallpaper over white; the sampler must
+// weigh transparency the same way or the two paths choose differently.
+assert(
+  /var alpha = data\[i \+ 3\] \/ 255\s*var white = 255 \* \(1 - alpha\)\s*red \+= data\[i\] \* alpha \+ white/.test(samplerQml),
+  'bar strip sampler counts transparent pixels as white, like the file path'
+)
+
 assert(
   /function openThemeSwitcher\(\) \{[\s\S]*if \(!root\.shell \|\| !root\.shell\.summon\("omarchy\.image-picker", payload\)\)\s*Util\.execArgv\(\["omarchy-shell", "shell", "summon", "omarchy\.image-picker", payload\]\)/.test(backgroundQml) &&
     !backgroundQml.includes('omarchy-theme-switcher'),
