@@ -6,9 +6,9 @@ import QtQuick
 Item {
   id: root
 
-  property var pendingCallback: null
-  property string grabUrl: ""
-  property rect stripRect: Qt.rect(0, 0, 0, 0)
+  // The request in flight: its callback, strip and grab url. Each step checks
+  // it is still the current one, so a replaced request cannot answer.
+  property var request: null
 
   // The grab renders on the GPU. The software renderer returns empty strips,
   // so callers fall back to decoding the file instead.
@@ -30,35 +30,37 @@ Item {
       return
     }
     // A newer request replaces one still in flight; its caller has moved on.
-    pendingCallback = callback
-    stripRect = rect
+    // Its grab is dropped too, or its late image load would answer this one.
+    if (request && request.url) canvas.unloadImage(request.url)
+    var current = { callback: callback, rect: rect, url: "" }
+    request = current
     strip.sourceItem = image
     strip.sourceRect = rect
     strip.width = rect.width
     strip.height = rect.height
     strip.scheduleUpdate()
-    var requested = callback
     var ok = strip.grabToImage(function(result) {
-      if (root.pendingCallback !== requested) return
-      root.grabUrl = result.url
+      if (root.request !== current) return
+      current.url = result.url
       canvas.width = rect.width
       canvas.height = rect.height
       canvas.loadImage(result.url)
       if (canvas.isImageLoaded(result.url)) canvas.requestPaint()
     })
-    if (!ok) finish("")
+    if (!ok) finish(current, "")
   }
 
   // Runs from the canvas's paint, the first point where a resized canvas has a
   // buffer of its new size; reading straight after a resize returned black.
   function average() {
-    if (!pendingCallback || !grabUrl || !canvas.isImageLoaded(grabUrl)) return
-    var w = stripRect.width, h = stripRect.height
+    var current = request
+    if (!current || !current.url || !canvas.isImageLoaded(current.url)) return
+    var w = current.rect.width, h = current.rect.height
     var ctx = canvas.getContext("2d")
     ctx.clearRect(0, 0, w, h)
     // The grab arrives in physical pixels (strip size x device pixel ratio),
     // so draw it scaled to the strip's own size before reading it back.
-    ctx.drawImage(grabUrl, 0, 0, w, h)
+    ctx.drawImage(current.url, 0, 0, w, h)
     var data = ctx.getImageData(0, 0, w, h).data
     // A still covers the canvas, but a video wallpaper would show it.
     ctx.clearRect(0, 0, w, h)
@@ -72,23 +74,22 @@ Item {
       green += data[i + 1] * alpha + white
       blue += data[i + 2] * alpha + white
     }
-    canvas.unloadImage(grabUrl)
-    grabUrl = ""
+    canvas.unloadImage(current.url)
     var count = w * h
     function channel(sum) {
       var hex = Math.floor(sum / count).toString(16)
       return hex.length < 2 ? "0" + hex : hex
     }
-    finish("#" + channel(red) + channel(green) + channel(blue))
+    finish(current, "#" + channel(red) + channel(green) + channel(blue))
   }
 
-  function finish(value) {
-    var callback = pendingCallback
-    pendingCallback = null
+  function finish(current, value) {
+    if (request !== current) return
+    request = null
     strip.sourceItem = null
     strip.width = 0
     strip.height = 0
-    if (callback) callback(value)
+    current.callback(value)
   }
 
   ShaderEffectSource {

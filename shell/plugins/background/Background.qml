@@ -510,8 +510,11 @@ Item {
         function onStripRequestChanged() {
           panel.maybeSampleStrip()
         }
+        // transitionBackground() moves currentBackground before
+        // incomingBackground, so sampling at once could take the previous
+        // transition's frame for the new wallpaper. Wait until both have moved.
         function onCurrentBackgroundChanged() {
-          panel.maybeSampleStrip()
+          Qt.callLater(panel.maybeSampleStrip)
         }
       }
 
