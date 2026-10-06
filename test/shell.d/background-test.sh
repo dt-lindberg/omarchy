@@ -21,7 +21,7 @@ assert(
 
 // The grab arrives in physical pixels, and the software renderer cannot grab.
 assert(
-  /ctx\.drawImage\(grabUrl, 0, 0, w, h\)/.test(samplerQml) &&
+  /ctx\.drawImage\(current\.url, 0, 0, w, h\)/.test(samplerQml) &&
     /available: GraphicsInfo\.api !== GraphicsInfo\.Software/.test(samplerQml),
   'bar strip sampler scales the grab to the strip and skips the software renderer'
 )
@@ -40,6 +40,78 @@ assert(
   /var alpha = data\[i \+ 3\] \/ 255\s*var white = 255 \* \(1 - alpha\)\s*red \+= data\[i\] \* alpha \+ white/.test(samplerQml),
   'bar strip sampler counts transparent pixels as white, like the file path'
 )
+
+// transitionBackground() moves currentBackground before incomingBackground; a
+// waiting strip request must not sample in between, or it takes the previous
+// transition's incoming frame for the new wallpaper.
+assert(
+  /function onCurrentBackgroundChanged\(\) \{\s*Qt\.callLater\(panel\.maybeSampleStrip\)/.test(backgroundQml),
+  'background samples a waiting strip request only once the transition state has moved'
+)
+
+// Run the sampler's own functions against stand-ins for the strip grab and the
+// canvas, so the order in which grabs and image loads land can be controlled.
+function samplerFunctions() {
+  const names = ['barRect', 'sample', 'average', 'finish']
+  const sources = names.map(name => {
+    const start = samplerQml.indexOf(`function ${name}(`)
+    let depth = 0
+    for (let i = samplerQml.indexOf('{', start); i < samplerQml.length; i++) {
+      if (samplerQml[i] === '{') depth++
+      if (samplerQml[i] === '}' && --depth === 0) return samplerQml.slice(start, i + 1)
+    }
+  })
+  const grabs = []
+  const requested = new Set()
+  const loaded = new Set()
+  const colours = {}
+  const strip = {
+    scheduleUpdate() {},
+    grabToImage(callback) { grabs.push(callback); return true }
+  }
+  let drawn = ''
+  const canvas = {
+    loadImage: url => requested.add(url),
+    isImageLoaded: url => loaded.has(url),
+    // As in Qt, unloading also cancels a load still in progress.
+    unloadImage: url => { requested.delete(url); loaded.delete(url) },
+    requestPaint: () => fns.average(),
+    getContext: () => ({
+      clearRect() {},
+      drawImage(url) { drawn = url },
+      getImageData(x, y, w, h) {
+        const data = new Uint8ClampedArray(w * h * 4)
+        for (let i = 0; i < data.length; i += 4) data.set([...colours[drawn], 255], i)
+        return { data }
+      }
+    })
+  }
+  const root = { request: null, available: true }
+  const Qt = { rect: (x, y, width, height) => ({ x, y, width, height }) }
+  const fns = new Function('root', 'strip', 'canvas', 'Qt',
+    `with (root) { ${sources.join('\n')}\nreturn { sample, average, finish } }`)(root, strip, canvas, Qt)
+  // The grab for request i returns, then its image finishes loading; the
+  // canvas paints either way.
+  fns.grab = (i, url, colour) => { colours[url] = colour; grabs[i]({ url }) }
+  fns.load = url => { if (requested.has(url)) loaded.add(url); canvas.requestPaint() }
+  fns.requested = requested
+  return fns
+}
+
+{
+  const sampler = samplerFunctions()
+  const image = { width: 100, height: 50 }
+  const answers = []
+  sampler.sample(image, 'top', 10, value => answers.push(['A', value]))
+  sampler.grab(0, 'grab-a', [255, 255, 255])
+  sampler.sample(image, 'top', 10, value => answers.push(['B', value]))
+  sampler.load('grab-a')
+  assertDeepEqual(answers, [], 'bar strip sampler ignores the image of a request it replaced')
+  assert(!sampler.requested.has('grab-a'), 'bar strip sampler unloads the grab of a request it replaced')
+  sampler.grab(1, 'grab-b', [0, 0, 0])
+  sampler.load('grab-b')
+  assertDeepEqual(answers, [['B', '#000000']], 'bar strip sampler answers the newer request from its own grab')
+}
 
 assert(
   /function openThemeSwitcher\(\) \{[\s\S]*if \(!root\.shell \|\| !root\.shell\.summon\("omarchy\.image-picker", payload\)\)\s*Util\.execArgv\(\["omarchy-shell", "shell", "summon", "omarchy\.image-picker", payload\]\)/.test(backgroundQml) &&
