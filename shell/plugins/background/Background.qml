@@ -428,9 +428,10 @@ Item {
       // Checks the image's own source, not the paths bound to it, which can
       // still name the previous wallpaper while the change propagates. A url
       // reads back with spaces and accents decoded, so compare decoded forms.
+      // An instant reload adds a "?v=" version to the still's url; drop it.
       function shows(image, path) {
         return !!image && !!path && image.status === Image.Ready
-          && decodeURIComponent(String(image.source)) === decodeURIComponent(root.imageUrl(path))
+          && decodeURIComponent(String(image.source).replace(/\?v=\d+$/, "")) === decodeURIComponent(root.imageUrl(path))
       }
 
       // The decoded image showing `path`, if any: the incoming frame of a

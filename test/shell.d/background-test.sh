@@ -14,7 +14,7 @@ const samplerQml = fs.readFileSync(path.join(root, 'shell/plugins/background/Bar
 assert(
   /function sampleBarStrip\(position, barSize, callback\) \{[\s\S]*?if \(!currentBackground \|\| isVideo\(currentBackground\)\) \{\s*callback\(""\)/.test(backgroundQml) &&
     /if \(root\.currentBackground === path && shows\(incomingFrame, root\.incomingBackground\)\) return incomingFrame/.test(backgroundQml) &&
-    /decodeURIComponent\(String\(image\.source\)\) === decodeURIComponent\(root\.imageUrl\(path\)\)/.test(backgroundQml) &&
+    /decodeURIComponent\(String\(image\.source\)\.replace\(\/\\\?v=\\d\+\$\/, ""\)\) === decodeURIComponent\(root\.imageUrl\(path\)\)/.test(backgroundQml) &&
     /id: stripRequestTimer[\s\S]*?root\.finishStripRequest\(root\.stripRequest, ""\)/.test(backgroundQml),
   'background samples the bar strip only from decoded stills, with a timeout'
 )
