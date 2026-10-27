@@ -62,8 +62,9 @@ Item {
     return null
   }
   // The wallpaper the transparent bar picks its text colour against, once it
-  // can be read: a video at once, a still once the first screen has decoded it.
-  readonly property string settledBackground: isVideo(currentBackground) || (firstPanel && firstPanel.currentImage) ? currentBackground : ""
+  // can be read: a video or a still that failed to decode at once, a still
+  // once the first screen has decoded it.
+  readonly property string settledBackground: isVideo(currentBackground) || (firstPanel && (firstPanel.currentImage || firstPanel.currentImageFailed)) ? currentBackground : ""
 
   function isVideo(path) {
     return Util.isVideoPath(path)
@@ -420,6 +421,7 @@ Item {
       readonly property Item currentImage: root.incomingBackground
         ? (incomingFrame.status === Image.Ready ? incomingFrame : null)
         : (base.ready && root.displayedBackground === root.currentBackground ? base : null)
+      readonly property bool currentImageFailed: root.incomingBackground ? incomingFrame.status === Image.Error : base.failed
 
       // Reads the decoded image back rather than decoding the file again. The
       // ShaderEffectSource copies just the strip; a Canvas is how QML reaches
@@ -595,13 +597,15 @@ Item {
           ctx.drawImage(current.url, 0, 0, width, height)
           var data = ctx.getImageData(0, 0, width, height).data
           unloadImage(current.url)
+          // Weighted by alpha, as a transparent wallpaper shows over the dark
+          // behind the background layer.
           var red = 0, green = 0, blue = 0
           for (var i = 0; i < data.length; i += 4) {
-            red += data[i]
-            green += data[i + 1]
-            blue += data[i + 2]
+            red += data[i] * data[i + 3]
+            green += data[i + 1] * data[i + 3]
+            blue += data[i + 2] * data[i + 3]
           }
-          var total = data.length / 4 * 255
+          var total = data.length / 4 * 255 * 255
           current.callback(String(Qt.rgba(red / total, green / total, blue / total, 1)))
         }
       }

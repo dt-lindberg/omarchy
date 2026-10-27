@@ -1583,6 +1583,10 @@ Item {
     function onSettledBackgroundChanged() {
       root.scheduleTransparentForegroundRefresh()
     }
+    // A hidden background answers without a sample, and can drop one in flight.
+    function onSuspendedChanged() {
+      root.scheduleTransparentForegroundRefresh()
+    }
   }
 
   function runProcess(process) {

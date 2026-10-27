@@ -126,15 +126,15 @@ result=$(HOME="$TMPDIR" PATH="$expired_bin:$PATH" \
 pass "timed-out wallpaper sample falls back to text color"
 
 # The shell reads the strip under the bar back from the still it has already
-# decoded. On a wallpaper light above and dark below, a top and a bottom bar must
-# choose opposite text colors from those samples.
+# decoded. On a wallpaper light above and all but transparent below, which shows
+# dark, a top and a bottom bar must choose opposite text colors.
 if compositor_reachable && command -v quickshell >/dev/null; then
   stage="$TMPDIR/shell"
   mkdir -p "$stage/home/.local/state/omarchy/current"
   ln -s "$ROOT/shell/plugins/background" "$stage/background"
   ln -s "$ROOT/shell/Commons" "$stage/Commons"
   ln -s "$ROOT/shell/Ui" "$stage/Ui"
-  magick -size 100x100 xc:'#202020' -fill '#f5f5f5' -draw 'rectangle 0,0 99,49' "$stage/split.png"
+  magick -size 100x100 xc:'rgba(255,255,255,0.01)' -fill '#f5f5f5' -draw 'rectangle 0,0 99,49' "$stage/split.png"
   ln -s "$stage/split.png" "$stage/home/.local/state/omarchy/current/background"
   cat >"$stage/shell.qml" <<'QML'
 import Quickshell
@@ -160,6 +160,13 @@ QML
   bottom=$(omarchy-bar-text-color bottom 20 '#ffffff' '#101010' --sample "${BASH_REMATCH[2]}")
   [[ $top == "#101010" && $bottom == "#ffffff" ]] || fail "the shell samples the bar strip from the decoded still" "$output"
   pass "the shell samples the bar strip from the decoded still"
+
+  # A wallpaper that cannot be decoded still answers, without a sample, so the
+  # bar falls back to the file rather than waiting for ever.
+  printf 'not an image' >"$stage/split.png"
+  output=$(HOME="$stage/home" timeout 10 quickshell -p "$stage" --no-color 2>&1) || true
+  [[ $output == *"SAMPLES  "* ]] || fail "an undecodable wallpaper answers without a sample" "$output"
+  pass "an undecodable wallpaper answers without a sample"
 else
   skip "no Wayland compositor; skipping the shell's bar strip sample"
 fi
