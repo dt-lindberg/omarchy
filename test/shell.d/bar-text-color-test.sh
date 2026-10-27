@@ -30,19 +30,11 @@ result=$(HOME="$TMPDIR" omarchy-bar-text-color top 20 '#ffffff' '#101010' --back
 [[ $result == "#ffffff" ]] || fail "transparent bar text falls back to text color when sampling fails" "expected #ffffff, got $result"
 pass "transparent bar text falls back to text color when sampling fails"
 
-# The shell can pass the strip's average colour it already read, so no file is
-# decoded; an invalid sample falls back to the text colour.
+# The shell passes the strip's average colour it already read, so no file is
+# decoded.
 result=$(HOME="$TMPDIR" omarchy-bar-text-color top 20 '#ffffff' '#101010' --sample '#f5f5f5' --background "$TMPDIR/missing.png")
 [[ $result == "#101010" ]] || fail "transparent bar text uses a sample passed by the shell" "expected #101010, got $result"
 pass "transparent bar text uses a sample passed by the shell"
-
-result=$(HOME="$TMPDIR" omarchy-bar-text-color top 20 '#ffffff' '#101010' --sample '#202020')
-[[ $result == "#ffffff" ]] || fail "transparent bar text keeps text color for a dark sample" "expected #ffffff, got $result"
-pass "transparent bar text keeps text color for a dark sample"
-
-result=$(HOME="$TMPDIR" omarchy-bar-text-color top 20 '#ffffff' '#101010' --sample 'f5f5f5' --background "$light_top" --screen 100x100)
-[[ $result == "#ffffff" ]] || fail "transparent bar text falls back on an invalid sample" "expected #ffffff, got $result"
-pass "transparent bar text falls back on an invalid sample"
 
 # Fine detail must be averaged, not point-sampled. On a quarter-white stripe
 # pattern at four times screen size, point sampling lands on the white stripes
@@ -132,3 +124,42 @@ result=$(HOME="$TMPDIR" PATH="$expired_bin:$PATH" \
   omarchy-bar-text-color top 20 '#ffffff' '#101010' --background "$light_top" --screen 100x100)
 [[ $result == "#ffffff" ]] || fail "timed-out wallpaper sample falls back to text color" "expected #ffffff, got $result"
 pass "timed-out wallpaper sample falls back to text color"
+
+# The shell reads the strip under the bar back from the still it has already
+# decoded. On a wallpaper light above and dark below, a top and a bottom bar must
+# choose opposite text colors from those samples.
+if compositor_reachable && command -v quickshell >/dev/null; then
+  stage="$TMPDIR/shell"
+  mkdir -p "$stage/home/.local/state/omarchy/current"
+  ln -s "$ROOT/shell/plugins/background" "$stage/background"
+  ln -s "$ROOT/shell/Commons" "$stage/Commons"
+  ln -s "$ROOT/shell/Ui" "$stage/Ui"
+  magick -size 100x100 xc:'#202020' -fill '#f5f5f5' -draw 'rectangle 0,0 99,49' "$stage/split.png"
+  ln -s "$stage/split.png" "$stage/home/.local/state/omarchy/current/background"
+  cat >"$stage/shell.qml" <<'QML'
+import Quickshell
+import "background" as BackgroundPlugin
+
+ShellRoot {
+  BackgroundPlugin.Background {
+    onSettledBackgroundChanged: {
+      if (!settledBackground) return
+      sampleBarStrip("top", 20, function(top) {
+        sampleBarStrip("bottom", 20, function(bottom) {
+          console.log("SAMPLES " + top + " " + bottom)
+          Qt.quit()
+        })
+      })
+    }
+  }
+}
+QML
+  output=$(HOME="$stage/home" timeout 10 quickshell -p "$stage" --no-color 2>&1) || true
+  [[ $output =~ SAMPLES\ (#[0-9a-f]{6})\ (#[0-9a-f]{6}) ]] || fail "the shell samples the bar strip from the decoded still" "$output"
+  top=$(omarchy-bar-text-color top 20 '#ffffff' '#101010' --sample "${BASH_REMATCH[1]}")
+  bottom=$(omarchy-bar-text-color bottom 20 '#ffffff' '#101010' --sample "${BASH_REMATCH[2]}")
+  [[ $top == "#101010" && $bottom == "#ffffff" ]] || fail "the shell samples the bar strip from the decoded still" "$output"
+  pass "the shell samples the bar strip from the decoded still"
+else
+  skip "no Wayland compositor; skipping the shell's bar strip sample"
+fi

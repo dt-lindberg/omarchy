@@ -82,8 +82,6 @@ Item {
   property color themeForeground: Commons.Color.bar.text
   property color themeContrastForeground: Commons.Color.background
   property color transparentForeground: Commons.Color.bar.text
-  // Counts strip sample requests, so only the latest answer starts a choice.
-  property int transparentSampleRequest: 0
   // The background plugin reads the strip under the bar from the wallpaper it
   // has already decoded, far faster than decoding the file again.
   readonly property var backgroundService: shell?.firstPartyServiceFor("omarchy.background") || null
@@ -1517,11 +1515,10 @@ Item {
   function refreshTransparentForeground() {
     if (!requestedTransparent || transparentForegroundProc.running) return
 
-    var request = ++transparentSampleRequest
-    if (backgroundService && typeof backgroundService.sampleBarStrip === "function") {
-      backgroundService.sampleBarStrip(root.position, root.barSize, function(sample) {
-        if (request === root.transparentSampleRequest) root.chooseTransparentForeground(sample)
-      })
+    var background = backgroundService
+    if (background && typeof background.sampleBarStrip === "function") {
+      // A wallpaper still decoding is sampled once it can be read.
+      if (background.settledBackground) background.sampleBarStrip(root.position, root.barSize, root.chooseTransparentForeground)
     } else {
       chooseTransparentForeground("")
     }
@@ -1580,12 +1577,10 @@ Item {
     onFileChanged: root.scheduleTransparentForegroundRefresh()
   }
 
-  // omarchy-theme-bg-set moves the state link before it tells the shell, so
-  // sample again once the background plugin has the new wallpaper.
   Connections {
     target: root.backgroundService
     ignoreUnknownSignals: true
-    function onCurrentBackgroundChanged() {
+    function onSettledBackgroundChanged() {
       root.scheduleTransparentForegroundRefresh()
     }
   }

@@ -54,9 +54,16 @@ Item {
     }
     return true
   }
-  // The transparent bar's text colour needs the average of the wallpaper under
-  // the bar. The request waits here until the current background has decoded.
-  property var stripRequest: null
+  // The first screen's background, which the transparent bar samples.
+  readonly property var firstPanel: {
+    for (var panel of backgrounds.instances) {
+      if (panel.modelData === Quickshell.screens[0]) return panel
+    }
+    return null
+  }
+  // The wallpaper the transparent bar picks its text colour against, once it
+  // can be read: a video at once, a still once the first screen has decoded it.
+  readonly property string settledBackground: isVideo(currentBackground) || (firstPanel && firstPanel.currentImage) ? currentBackground : ""
 
   function isVideo(path) {
     return Util.isVideoPath(path)
@@ -200,6 +207,14 @@ Item {
     sizeProbe.running = true
   }
 
+  // Calls back with the average colour ("#rrggbb") of the strip a bar covers on
+  // the first screen, read from the decoded wallpaper, or with "" when there is
+  // none, as behind a video.
+  function sampleBarStrip(position, barSize, callback) {
+    if (firstPanel) firstPanel.sampleBarStrip(position, barSize, callback)
+    else callback("")
+  }
+
   // Each theme switch names fresh snapshot paths, so keep only the sizes of
   // the wallpapers still in play.
   function pruneNativeSizes() {
@@ -209,28 +224,6 @@ Item {
       if (paths[i] && nativeSizes[paths[i]] !== undefined) kept[paths[i]] = nativeSizes[paths[i]]
     }
     nativeSizes = kept
-  }
-
-  // Calls back with the average colour ("#rrggbb") of the strip a bar of
-  // barSize covers along `position` of the first screen, read from the decoded
-  // image of the current background, or with "" when there is none (a video,
-  // a failed decode, or no decoded image within the timeout).
-  function sampleBarStrip(position, barSize, callback) {
-    if (stripRequest) stripRequest.callback("")
-    stripRequest = null
-    if (!currentBackground || isVideo(currentBackground)) {
-      callback("")
-      return
-    }
-    stripRequest = { position: position, barSize: barSize, callback: callback }
-    stripRequestTimer.restart()
-  }
-
-  function finishStripRequest(request, sample) {
-    if (stripRequest !== request) return
-    stripRequest = null
-    stripRequestTimer.stop()
-    request.callback(sample)
   }
 
   function openSelector() {
@@ -333,15 +326,6 @@ Item {
     onTriggered: root.preparedBackground = ""
   }
 
-  // A background that never reaches a decoded image falls back to sampling the
-  // file.
-  Timer {
-    id: stripRequestTimer
-    interval: 3000
-    repeat: false
-    onTriggered: if (root.stripRequest) root.finishStripRequest(root.stripRequest, "")
-  }
-
   Timer {
     id: pendingThemeFallbackTimer
     interval: 300
@@ -421,44 +405,6 @@ Item {
         return Qt.size(decodeWidth, decodeHeight)
       }
 
-      // The first screen samples for the bar, as `omarchy-bar-text-color` reads
-      // the first monitor's size.
-      readonly property bool samplesBar: modelData === Quickshell.screens[0]
-
-      // Checks the image's own source, not the paths bound to it, which can
-      // still name the previous wallpaper while the change propagates. A url
-      // reads back with spaces and accents decoded, so compare decoded forms.
-      // An instant reload adds a "?v=" version to the still's url; drop it.
-      function shows(image, path) {
-        return !!image && !!path && image.status === Image.Ready
-          && decodeURIComponent(String(image.source).replace(/\?v=\d+$/, "")) === decodeURIComponent(root.imageUrl(path))
-      }
-
-      // The decoded image showing `path`, if any: the incoming frame of a
-      // transition, or the still on screen. A theme switch reveals a snapshot
-      // copy of its wallpaper, so its incoming frame stands for the final path.
-      function decodedImage(path) {
-        if (shows(incomingFrame, path)) return incomingFrame
-        if (root.currentBackground === path && shows(incomingFrame, root.incomingBackground)) return incomingFrame
-        if (shows(base.current, path)) return base.current
-        return null
-      }
-
-      function maybeSampleStrip() {
-        var request = root.stripRequest
-        if (!samplesBar || !request || request.sampling) return
-        if (root.isVideo(root.currentBackground)) {
-          root.finishStripRequest(request, "")
-          return
-        }
-        var image = decodedImage(root.currentBackground)
-        if (!image) return
-        request.sampling = true
-        stripSampler.sample(image, request.position, request.barSize, function(sample) {
-          root.finishStripRequest(request, sample)
-        })
-      }
-
       function maybeStartReveal() {
         if (!root.incomingBackground || root.revealProgress !== 0 || maskReady) return
         if (incomingFrame.status !== Image.Ready) return
@@ -467,6 +413,29 @@ Item {
           if (incomingFrame.status !== Image.Ready) return
           root.startReveal(panel)
         })
+      }
+
+      // The decoded image showing the current wallpaper: a transition's
+      // incoming frame, else the still. Null while it loads, or behind a video.
+      readonly property Item currentImage: root.incomingBackground
+        ? (incomingFrame.status === Image.Ready ? incomingFrame : null)
+        : (base.ready && root.displayedBackground === root.currentBackground ? base : null)
+
+      // Reads the decoded image back rather than decoding the file again. The
+      // ShaderEffectSource copies just the strip; a Canvas is how QML reaches
+      // its pixels.
+      function sampleBarStrip(position, barSize, callback) {
+        var size = Math.min(barSize, position === "top" || position === "bottom" ? height : width)
+        barStrip.sourceRect = position === "top" ? Qt.rect(0, 0, width, size)
+          : position === "bottom" ? Qt.rect(0, height - size, width, size)
+          : position === "left" ? Qt.rect(0, 0, size, height)
+          : Qt.rect(width - size, 0, size, height)
+        barStrip.width = barStrip.sourceRect.width
+        barStrip.height = barStrip.sourceRect.height
+        barStrip.scheduleUpdate()
+        // A panel hidden under a theme intro has no window to grab from.
+        if (!panel.visible || !currentImage || !barStrip.grabToImage(function(result) { barStripCanvas.read(result.url, callback) }))
+          callback("")
       }
 
       WlrLayershell.namespace: "omarchy-background"
@@ -487,7 +456,6 @@ Item {
         onFailedChanged: if (failed) root.recoverBackground(path)
         onReadyChanged: {
           panel.readyFrames = 0
-          panel.maybeSampleStrip()
           if (ready && root.finishingTransition) {
             root.incomingBackground = ""
             root.oldBackground = ""
@@ -542,10 +510,7 @@ Item {
           cache: false
           smooth: true
           mipmap: true
-          onStatusChanged: {
-            panel.maybeStartReveal()
-            panel.maybeSampleStrip()
-          }
+          onStatusChanged: panel.maybeStartReveal()
         }
       }
 
@@ -583,21 +548,6 @@ Item {
           panel.maskReady = false
           panel.maybeStartReveal()
         }
-        function onStripRequestChanged() {
-          panel.maybeSampleStrip()
-        }
-        // transitionBackground() moves currentBackground before
-        // incomingBackground, so sampling at once could take the previous
-        // transition's frame for the new wallpaper. Wait until both have moved.
-        function onCurrentBackgroundChanged() {
-          Qt.callLater(panel.maybeSampleStrip)
-        }
-      }
-
-      // Below every frame, so the strip it renders while sampling stays hidden.
-      BarStripSampler {
-        id: stripSampler
-        z: -1
       }
 
       MouseArea {
@@ -607,6 +557,52 @@ Item {
           if (mouse.button === Qt.RightButton) root.openThemeSwitcher()
           else root.openSelector()
           mouse.accepted = true
+        }
+      }
+
+      // Both must stay visible for Qt to render and paint them, so they sit
+      // just off the screen's edge.
+      ShaderEffectSource {
+        id: barStrip
+        x: -width
+        sourceItem: panel.currentImage
+        live: false
+        hideSource: false
+      }
+
+      Canvas {
+        id: barStripCanvas
+        property var request: null
+        x: -width
+        renderTarget: Canvas.Image
+        renderStrategy: Canvas.Immediate
+
+        function read(url, callback) {
+          if (request) unloadImage(request.url)
+          request = { url: url, callback: callback }
+          width = barStrip.width
+          height = barStrip.height
+          loadImage(url)
+          requestPaint()
+        }
+
+        onPaint: {
+          var current = request
+          if (!current) return
+          request = null
+          var ctx = getContext("2d")
+          ctx.clearRect(0, 0, width, height)
+          ctx.drawImage(current.url, 0, 0, width, height)
+          var data = ctx.getImageData(0, 0, width, height).data
+          unloadImage(current.url)
+          var red = 0, green = 0, blue = 0
+          for (var i = 0; i < data.length; i += 4) {
+            red += data[i]
+            green += data[i + 1]
+            blue += data[i + 2]
+          }
+          var total = data.length / 4 * 255
+          current.callback(String(Qt.rgba(red / total, green / total, blue / total, 1)))
         }
       }
     }
